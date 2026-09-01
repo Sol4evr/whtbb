@@ -48,6 +48,29 @@ if [ "$SHA" != "$EXPECTED_SHA" ]; then
 fi
 printf '%s  %s\n' "$SHA" "games/whtbb/brain_game_2_6_7_translated_v1.swf" > "$ROOT/SHA256.txt"
 
+# Temporary preservation-safe diagnostics: inspect strings in a decompressed copy
+# without modifying the checksum-verified SWF served to players.
+python3 - "$SWF" "$ROOT/swf-diagnostics.txt" <<'PY'
+import pathlib, re, sys, zlib
+src = pathlib.Path(sys.argv[1]).read_bytes()
+if src[:3] == b'CWS':
+    raw = b'FWS' + src[3:8] + zlib.decompress(src[8:])
+elif src[:3] == b'FWS':
+    raw = src
+else:
+    raw = src
+strings = [m.group().decode('latin-1', 'replace') for m in re.finditer(rb'[ -~]{4,}', raw)]
+terms = re.compile(r'(score|high.?score|result|final|finish|game.?over|challenge|shared.?object|external.?interface|profile|player.?name|leader.?board|submit)', re.I)
+hits = []
+seen = set()
+for s in strings:
+    if terms.search(s) and s not in seen:
+        seen.add(s)
+        hits.append(s[:1000])
+pathlib.Path(sys.argv[2]).write_text('\n'.join(hits) + '\n', encoding='utf-8')
+print(f"SWF diagnostic strings: {len(hits)}")
+PY
+
 python3 - "$ROOT" <<'PY'
 import json, pathlib, sys
 root=pathlib.Path(sys.argv[1])
