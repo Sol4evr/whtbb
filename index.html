@@ -30,7 +30,7 @@
     .modal{position:fixed;inset:0;z-index:40;background:rgba(4,7,16,.78);display:flex;align-items:center;justify-content:center;padding:18px}.modal[hidden]{display:none!important}
     .panel{width:min(720px,100%);max-height:min(82vh,760px);overflow:auto;background:var(--panel);border:1px solid #35406f;border-radius:20px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
     .panel-head{display:flex;gap:12px;align-items:flex-start;justify-content:space-between}.panel h2{margin:0;font-size:24px}.panel .sub{margin:5px 0 14px;color:var(--muted);font-size:13px;line-height:1.4}
-    .score-form{display:grid;grid-template-columns:1.2fr 1fr auto;gap:8px;margin:12px 0 16px}.score-form input{width:100%;min-width:0;border:1px solid #46517f;border-radius:11px;background:#0f1530;color:#fff;padding:11px 12px;font-size:16px}
+    .score-form{display:grid;grid-template-columns:1.2fr 1fr auto;gap:8px;margin:12px 0 16px}.score-form input{width:100%;min-width:0;border:1px solid #46517f;border-radius:11px;background:#0f1530;color:#fff;padding:11px 12px;font-size:16px}.score-form input[readonly]{opacity:.85;background:#121936}
     .score-list{display:grid;gap:8px}.score-row{display:grid;grid-template-columns:48px 1fr auto;gap:10px;align-items:center;background:var(--panel2);border-radius:13px;padding:10px 12px}.rank{font-weight:900;font-size:18px;color:var(--accent)}.who{min-width:0}.who strong{display:block}.who small{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.points{font-weight:900;font-size:21px}.empty{padding:18px;text-align:center;color:var(--muted);background:var(--panel2);border-radius:13px}
     .tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.storage-note{margin-top:14px;padding:11px 12px;border-radius:12px;background:#111831;color:var(--muted);font-size:12px;line-height:1.45}.storage-note strong{color:var(--ok)}
     #restoreFile{display:none}
@@ -63,7 +63,7 @@
   <section id="scoreModal" class="modal" hidden aria-modal="true" role="dialog" aria-labelledby="scoreTitle">
     <div class="panel">
       <div class="panel-head">
-        <div><h2 id="scoreTitle">Local Challenge</h2><p class="sub">The original Facebook Challenge service no longer exists. Record each final brain score here and this device will keep your family leaderboard.</p></div>
+        <div><h2 id="scoreTitle">Local Challenge</h2><p id="scoreSub" class="sub">The original Facebook Challenge service no longer exists. Record each final brain score here and this device will keep your family leaderboard.</p></div>
         <button id="closeScores" class="secondary" type="button">Done</button>
       </div>
       <form id="scoreForm" class="score-form">
@@ -78,7 +78,7 @@
         <button id="clearScores" class="danger" type="button">Clear leaderboard</button>
         <input id="restoreFile" type="file" accept="application/json,.json" />
       </div>
-      <div class="storage-note"><strong>Saved locally:</strong> this leaderboard is loaded automatically whenever you return on this browser/device. Ruffle also keeps any Flash SharedObject save data the game itself writes in browser-managed storage. The downloadable backup covers the Local Challenge leaderboard; Ruffle does not currently expose a reliable public web API for exporting its internal Flash save.</div>
+      <div class="storage-note"><strong>Automatic score capture:</strong> when the game reaches its result summary, the original SWF's computed total is detected and this panel opens with the score filled in. Enter or confirm the player name and tap Save score. Scores are currently stored on this browser/device; cloud sync across iPhone and iPad requires the shared database connection being added next.</div>
     </div>
   </section>
 
@@ -94,6 +94,13 @@
     const scoreList=document.getElementById("scoreList");
     const playerName=document.getElementById("playerName");
     const brainScore=document.getElementById("brainScore");
+    const scoreTitle=document.getElementById("scoreTitle");
+    const scoreSub=document.getElementById("scoreSub");
+    let detectedFinalScore=null;
+    let detectedScorePriority=0;
+    let autoPromptTimer=null;
+    let autoEntryMode=false;
+    let lastAutoPrompt={score:null,time:0};
 
     window.RufflePlayer=window.RufflePlayer||{};
     window.RufflePlayer.config={autoplay:"on",unmuteOverlay:"hidden",backgroundColor:"#000000",letterbox:"on",scale:"showAll",forceScale:true,quality:"high",warnOnUnsupportedContent:false,contextMenu:false,allowScriptAccess:true};
@@ -102,18 +109,74 @@
     async function registerSW(){if(!("serviceWorker" in navigator))return null;try{return await navigator.serviceWorker.register("/sw.js")}catch(e){console.warn("Service worker registration failed",e);return null}}
     function loadScript(src){return new Promise((resolve,reject)=>{if(document.querySelector(`script[src="${src}"]`))return resolve();const s=document.createElement("script");s.src=src;s.onload=resolve;s.onerror=reject;document.head.appendChild(s)})}
     async function warmOfflineCache(){const reg=await navigator.serviceWorker.ready.catch(()=>null);const target=reg?.active||navigator.serviceWorker.controller;if(target)target.postMessage({type:"CACHE_GAME"})}
-    async function startGame(){playBtn.disabled=true;setStatus("Loading game…");try{await registerSW();await loadScript(RUFFLE_PATH);await warmOfflineCache();const ruffle=window.RufflePlayer.newest();const player=ruffle.createPlayer();document.getElementById("player").replaceChildren(player);player.style.width="100%";player.style.height="100%";await player.ruffle().load(SWF_PATH);startScreen.hidden=true;setStatus("Playing · offline cache warming");setTimeout(()=>setStatus("Offline ready"),3500)}catch(e){console.error(e);setStatus("Could not start",true);playBtn.disabled=false;alert("The game could not start. Check that the preserved SWF and local Ruffle files were included in this build.")}}
+
+    function captureCandidateScore(message){
+      const text=String(message||"");
+      const patterns=[
+        {re:/\b_sumTotalScore\s*=\s*(\d+)/i,p:5},
+        {re:/\bplayerTotalScore\s*=\s*(\d+)/i,p:5},
+        {re:/\bcombinedScore\s*=\s*(\d+)/i,p:4},
+        {re:/\btotalScore\s*=\s*(\d+)/i,p:4},
+        {re:/\bcurScore\s*=\s*(\d+)/i,p:2}
+      ];
+      for(const {re,p} of patterns){
+        const m=text.match(re);if(!m)continue;
+        const n=Number(m[1]);
+        if(Number.isInteger(n)&&n>0&&n<=999999999&&p>=detectedScorePriority){detectedFinalScore=n;detectedScorePriority=p}
+      }
+      const strongFinal=/--SummaryScreen\.uploadScore\(\)--|ScoreUploading|STATE_POST_SCORE_COUNTING/i.test(text);
+      if(strongFinal&&detectedFinalScore) scheduleAutoPrompt(400);
+      else if(detectedScorePriority>=4&&detectedFinalScore) scheduleAutoPrompt(2600);
+    }
+
+    function scheduleAutoPrompt(delay){
+      if(autoPromptTimer)clearTimeout(autoPromptTimer);
+      autoPromptTimer=setTimeout(()=>{
+        const score=detectedFinalScore;
+        if(!score)return;
+        const now=Date.now();
+        if(lastAutoPrompt.score===score&&now-lastAutoPrompt.time<45000)return;
+        lastAutoPrompt={score,time:now};
+        openScores(score,true);
+        detectedFinalScore=null;detectedScorePriority=0;
+      },delay);
+    }
+
+    async function startGame(){
+      playBtn.disabled=true;setStatus("Loading game…");
+      try{
+        await registerSW();await loadScript(RUFFLE_PATH);await warmOfflineCache();
+        const ruffle=window.RufflePlayer.newest();const player=ruffle.createPlayer();document.getElementById("player").replaceChildren(player);player.style.width="100%";player.style.height="100%";
+        const api=player.ruffle();
+        api.traceObserver=captureCandidateScore;
+        await api.load(SWF_PATH);
+        startScreen.hidden=true;setStatus("Playing · score capture ready");setTimeout(()=>setStatus("Offline ready"),3500)
+      }catch(e){console.error(e);setStatus("Could not start",true);playBtn.disabled=false;alert("The game could not start. Check that the preserved SWF and local Ruffle files were included in this build.")}
+    }
 
     function readScores(){try{const data=JSON.parse(localStorage.getItem(SCORE_KEY)||"[]");return Array.isArray(data)?data.filter(x=>x&&Number.isFinite(Number(x.score))):[]}catch(_){return []}}
     function writeScores(scores){localStorage.setItem(SCORE_KEY,JSON.stringify(scores.slice(0,200)))}
     function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
-    function renderScores(){const scores=readScores().sort((a,b)=>Number(b.score)-Number(a.score)||String(b.date).localeCompare(String(a.date)));if(!scores.length){scoreList.innerHTML='<div class="empty">No local scores yet. Finish a game, open Local Challenge and record the final score.</div>';return}scoreList.innerHTML=scores.slice(0,50).map((s,i)=>`<div class="score-row"><div class="rank">#${i+1}</div><div class="who"><strong>${esc(s.name||"Player")}</strong><small>${new Date(s.date).toLocaleString()}</small></div><div class="points">${Number(s.score).toLocaleString()}</div></div>`).join("")}
-    function openScores(){playerName.value=localStorage.getItem(NAME_KEY)||"";brainScore.value="";renderScores();modal.hidden=false;setTimeout(()=>{if(!playerName.value)playerName.focus();else brainScore.focus()},50)}
-    function closeScores(){modal.hidden=true}
+    function renderScores(){const scores=readScores().sort((a,b)=>Number(b.score)-Number(a.score)||String(b.date).localeCompare(String(a.date)));if(!scores.length){scoreList.innerHTML='<div class="empty">No saved scores yet. Complete a full game and the final score should be detected automatically.</div>';return}scoreList.innerHTML=scores.slice(0,50).map((s,i)=>`<div class="score-row"><div class="rank">#${i+1}</div><div class="who"><strong>${esc(s.name||"Player")}</strong><small>${new Date(s.date).toLocaleString()}</small></div><div class="points">${Number(s.score).toLocaleString()}</div></div>`).join("")}
+    function openScores(prefillScore=null,isAuto=false){
+      autoEntryMode=Boolean(isAuto&&Number.isInteger(Number(prefillScore)));
+      playerName.value=localStorage.getItem(NAME_KEY)||"";
+      brainScore.value=autoEntryMode?String(prefillScore):"";
+      brainScore.readOnly=autoEntryMode;
+      scoreTitle.textContent=autoEntryMode?"Save your score":"Local Challenge";
+      scoreSub.textContent=autoEntryMode?`Final score detected: ${Number(prefillScore).toLocaleString()}. Enter your name to add it to the leaderboard.`:"The original Facebook Challenge service no longer exists. Record a score here for the local family leaderboard.";
+      renderScores();modal.hidden=false;
+      setTimeout(()=>{if(!playerName.value){playerName.focus()}else if(autoEntryMode){playerName.focus();playerName.select()}else{brainScore.focus()}},50)
+    }
+    function closeScores(){modal.hidden=true;autoEntryMode=false;brainScore.readOnly=false}
 
-    document.getElementById("scoreForm").addEventListener("submit",e=>{e.preventDefault();const name=playerName.value.trim();const score=Number(brainScore.value);if(!name||!Number.isInteger(score)||score<0||score>999999999)return;const scores=readScores();scores.push({name,score,date:new Date().toISOString()});writeScores(scores);localStorage.setItem(NAME_KEY,name);brainScore.value="";renderScores();brainScore.focus()});
-    document.getElementById("scores").addEventListener("click",openScores);document.getElementById("closeScores").addEventListener("click",closeScores);modal.addEventListener("click",e=>{if(e.target===modal)closeScores()});
-    document.getElementById("backup").addEventListener("click",()=>{const payload={format:"whtbb-local-challenge",version:1,exportedAt:new Date().toISOString(),scores:readScores(),lastPlayer:localStorage.getItem(NAME_KEY)||""};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`whtbb-scores-${new Date().toISOString().slice(0,10)}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
+    document.getElementById("scoreForm").addEventListener("submit",e=>{
+      e.preventDefault();const name=playerName.value.trim();const score=Number(brainScore.value);if(!name||!Number.isInteger(score)||score<0||score>999999999)return;
+      const scores=readScores();scores.push({name,score,date:new Date().toISOString(),source:autoEntryMode?"game":"manual"});writeScores(scores);localStorage.setItem(NAME_KEY,name);renderScores();
+      if(autoEntryMode){setStatus(`Saved ${score.toLocaleString()} for ${name}`);setTimeout(closeScores,450)}else{brainScore.value="";brainScore.focus()}
+    });
+    document.getElementById("scores").addEventListener("click",()=>openScores());document.getElementById("closeScores").addEventListener("click",closeScores);modal.addEventListener("click",e=>{if(e.target===modal)closeScores()});
+    document.getElementById("backup").addEventListener("click",()=>{const payload={format:"whtbb-local-challenge",version:2,exportedAt:new Date().toISOString(),scores:readScores(),lastPlayer:localStorage.getItem(NAME_KEY)||""};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`whtbb-scores-${new Date().toISOString().slice(0,10)}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
     document.getElementById("restore").addEventListener("click",()=>document.getElementById("restoreFile").click());
     document.getElementById("restoreFile").addEventListener("change",async e=>{const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());if(data?.format!=="whtbb-local-challenge"||!Array.isArray(data.scores))throw new Error("Invalid backup");writeScores(data.scores);if(typeof data.lastPlayer==="string")localStorage.setItem(NAME_KEY,data.lastPlayer);renderScores();alert("Local Challenge backup restored.")}catch(_){alert("That file is not a valid WHTBB score backup.")}finally{e.target.value=""}});
     document.getElementById("clearScores").addEventListener("click",()=>{if(confirm("Clear all locally recorded WHTBB scores on this device?")){localStorage.removeItem(SCORE_KEY);renderScores()}});
