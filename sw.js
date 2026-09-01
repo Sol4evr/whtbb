@@ -1,5 +1,5 @@
-const SHELL_CACHE = "whtbb-shell-v1";
-const GAME_CACHE = "whtbb-game-v1";
+const SHELL_CACHE = "whtbb-shell-v2";
+const GAME_CACHE = "whtbb-game-v2";
 const SHELL = ["/", "/index.html", "/manifest.json", "/icons/icon-180.png", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", event => {
@@ -53,7 +53,7 @@ self.addEventListener("fetch", event => {
 
   event.respondWith((async()=>{
     try{
-      const fresh = await fetch(event.request);
+      const fresh = await fetch(event.request, {cache:"no-store"});
       if(fresh.ok){ const cache=await caches.open(SHELL_CACHE); cache.put(event.request,fresh.clone()); }
       return fresh;
     }catch(_){
