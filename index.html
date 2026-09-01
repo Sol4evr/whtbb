@@ -21,7 +21,7 @@
     .brand{min-width:0}.brand h1{font-size:clamp(17px,2.3vw,24px);line-height:1.1;margin:0}.brand p{font-size:12px;color:var(--muted);margin:4px 0 0}
     .actions{display:flex;gap:8px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
     button{appearance:none;border:0;border-radius:12px;padding:10px 14px;font-weight:800;font-size:14px;background:var(--accent);color:#171300;cursor:pointer;min-height:42px}
-    button.secondary{background:#2a335c;color:#fff}button.danger{background:#542d3d;color:#fff}button:disabled{opacity:.55}
+    button.secondary{background:#2a335c;color:#fff}button:disabled{opacity:.55}
     #stage{position:relative;min-height:0;border-radius:18px;overflow:hidden;background:#000;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 40px rgba(0,0,0,.35)}
     #player{width:100%;height:100%;display:flex;align-items:center;justify-content:center}ruffle-player{width:100%;height:100%}
     .start{position:absolute;inset:0;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 35%,#29346a 0,#11162e 58%,#080b18 100%);z-index:5}.start[hidden]{display:none!important}
@@ -43,7 +43,7 @@
       <div class="brand"><h1>Who Has The Biggest Brain?</h1><p>Playfish (2009) · preserved offline build</p></div>
       <div class="actions">
         <span id="status" class="status">Ready</span>
-        <button id="scores" class="secondary" type="button">Local Challenge</button>
+        <button id="scores" class="secondary" type="button">Leaderboard</button>
         <button id="fullscreen" class="secondary" type="button">Full screen</button>
       </div>
     </header>
@@ -63,7 +63,7 @@
   <section id="scoreModal" class="modal" hidden aria-modal="true" role="dialog" aria-labelledby="scoreTitle">
     <div class="panel">
       <div class="panel-head">
-        <div><h2 id="scoreTitle">Local Challenge</h2><p id="scoreSub" class="sub">The original Facebook Challenge service no longer exists. Record each final brain score here and this device will keep your family leaderboard.</p></div>
+        <div><h2 id="scoreTitle">Shared Leaderboard</h2><p id="scoreSub" class="sub">Scores sync across your devices. Complete a game and the final result should be detected automatically.</p></div>
         <button id="closeScores" class="secondary" type="button">Done</button>
       </div>
       <form id="scoreForm" class="score-form">
@@ -75,17 +75,19 @@
       <div class="tools">
         <button id="backup" class="secondary" type="button">Backup scores</button>
         <button id="restore" class="secondary" type="button">Restore backup</button>
-        <button id="clearScores" class="danger" type="button">Clear leaderboard</button>
         <input id="restoreFile" type="file" accept="application/json,.json" />
       </div>
-      <div class="storage-note"><strong>Automatic score capture:</strong> when the game reaches its result summary, the original SWF's computed total is detected and this panel opens with the score filled in. Enter or confirm the player name and tap Save score. Scores are currently stored on this browser/device; cloud sync across iPhone and iPad requires the shared database connection being added next.</div>
+      <div class="storage-note"><strong>Cloud synced:</strong> saved scores are stored in the shared WHTBB database and load on iPhone, iPad and desktop. Offline saves stay on-device and upload when you reconnect. The original Flash save data remains browser-managed by Ruffle.</div>
     </div>
   </section>
 
   <script>
     const SWF_PATH="/games/whtbb/brain_game_2_6_7_translated_v1.swf";
     const RUFFLE_PATH="/vendor/ruffle/ruffle.js";
-    const SCORE_KEY="whtbb.localLeaderboard.v1";
+    const SUPABASE_URL="https://dqtqgniawackivzdyxex.supabase.co";
+    const SUPABASE_KEY="sb_publishable_T7wKOAmDzXQyV9NiGdu_zg_4mGUZDWK";
+    const SCORE_KEY="whtbb.localLeaderboard.v2";
+    const LEGACY_SCORE_KEY="whtbb.localLeaderboard.v1";
     const NAME_KEY="whtbb.lastPlayer.v1";
     const statusEl=document.getElementById("status");
     const playBtn=document.getElementById("play");
@@ -96,11 +98,9 @@
     const brainScore=document.getElementById("brainScore");
     const scoreTitle=document.getElementById("scoreTitle");
     const scoreSub=document.getElementById("scoreSub");
-    let detectedFinalScore=null;
-    let detectedScorePriority=0;
-    let autoPromptTimer=null;
-    let autoEntryMode=false;
+    let detectedFinalScore=null,detectedScorePriority=0,autoPromptTimer=null,autoEntryMode=false;
     let lastAutoPrompt={score:null,time:0};
+    let cloudScores=[];
 
     window.RufflePlayer=window.RufflePlayer||{};
     window.RufflePlayer.config={autoplay:"on",unmuteOverlay:"hidden",backgroundColor:"#000000",letterbox:"on",scale:"showAll",forceScale:true,quality:"high",warnOnUnsupportedContent:false,contextMenu:false,allowScriptAccess:true};
@@ -109,38 +109,65 @@
     async function registerSW(){if(!("serviceWorker" in navigator))return null;try{return await navigator.serviceWorker.register("/sw.js")}catch(e){console.warn("Service worker registration failed",e);return null}}
     function loadScript(src){return new Promise((resolve,reject)=>{if(document.querySelector(`script[src="${src}"]`))return resolve();const s=document.createElement("script");s.src=src;s.onload=resolve;s.onerror=reject;document.head.appendChild(s)})}
     async function warmOfflineCache(){const reg=await navigator.serviceWorker.ready.catch(()=>null);const target=reg?.active||navigator.serviceWorker.controller;if(target)target.postMessage({type:"CACHE_GAME"})}
+    function uid(){return globalThis.crypto?.randomUUID?crypto.randomUUID():`whtbb-${Date.now()}-${Math.random().toString(36).slice(2)}`}
+    function validScore(v){const n=Number(v);return Number.isInteger(n)&&n>=0&&n<=999999999?n:null}
+    function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+
+    function readScores(){
+      try{
+        let raw=localStorage.getItem(SCORE_KEY);
+        if(!raw){
+          const legacy=JSON.parse(localStorage.getItem(LEGACY_SCORE_KEY)||"[]");
+          const migrated=Array.isArray(legacy)?legacy.map(s=>({name:String(s.name||"Player").slice(0,30),score:Number(s.score),date:s.date||new Date().toISOString(),source:s.source==="game"?"automatic":"imported",client_id:uid(),synced:false})):[];
+          localStorage.setItem(SCORE_KEY,JSON.stringify(migrated));localStorage.removeItem(LEGACY_SCORE_KEY);raw=JSON.stringify(migrated)
+        }
+        const data=JSON.parse(raw||"[]");return Array.isArray(data)?data.filter(x=>x&&validScore(x.score)!==null):[]
+      }catch(_){return []}
+    }
+    function writeScores(scores){localStorage.setItem(SCORE_KEY,JSON.stringify(scores.slice(0,300)))}
+    function mergedScores(){
+      const map=new Map();
+      for(const s of [...cloudScores,...readScores()]){
+        const item={name:s.name||s.player_name||"Player",score:Number(s.score),date:s.date||s.played_at||new Date().toISOString(),client_id:s.client_id,source:s.source||"manual"};
+        const key=item.client_id||`${item.name}|${item.score}|${item.date}`;if(!map.has(key))map.set(key,item)
+      }
+      return [...map.values()].sort((a,b)=>b.score-a.score||String(b.date).localeCompare(String(a.date)))
+    }
+    function renderScores(){const scores=mergedScores();if(!scores.length){scoreList.innerHTML='<div class="empty">No saved scores yet. Complete a full game and the final score should be detected automatically.</div>';return}scoreList.innerHTML=scores.slice(0,50).map((s,i)=>`<div class="score-row"><div class="rank">#${i+1}</div><div class="who"><strong>${esc(s.name)}</strong><small>${new Date(s.date).toLocaleString()}</small></div><div class="points">${s.score.toLocaleString()}</div></div>`).join("")}
+
+    async function api(path,options={}){
+      const headers={apikey:SUPABASE_KEY,"Content-Type":"application/json",...(options.headers||{})};
+      const res=await fetch(`${SUPABASE_URL}/rest/v1/${path}`,{...options,headers});if(!res.ok)throw new Error(`Score service ${res.status}`);if(res.status===204)return null;const text=await res.text();return text?JSON.parse(text):null
+    }
+    async function loadCloudScores(){
+      try{const rows=await api("scores?select=player_name,score,played_at,client_id,source&order=score.desc,played_at.desc&limit=100");cloudScores=(rows||[]).map(r=>({name:r.player_name,score:Number(r.score),date:r.played_at,client_id:r.client_id,source:r.source}));renderScores();return true}catch(e){console.warn("Cloud leaderboard unavailable",e);renderScores();return false}
+    }
+    async function uploadRecord(r){
+      try{await api("scores?on_conflict=client_id",{method:"POST",headers:{Prefer:"resolution=ignore-duplicates,return=minimal"},body:JSON.stringify({player_name:r.name,score:r.score,played_at:r.date,client_id:r.client_id,source:r.source||"manual"})});return true}catch(e){console.warn("Score queued for later sync",e);return false}
+    }
+    async function syncScores(){
+      const local=readScores();let changed=false;
+      for(const r of local){if(!r.synced&&await uploadRecord(r)){r.synced=true;changed=true}}
+      if(changed)writeScores(local);await loadCloudScores()
+    }
+    async function saveScore(name,score,source){
+      const record={name,score,date:new Date().toISOString(),source,client_id:uid(),synced:false};const local=readScores();local.push(record);writeScores(local);renderScores();
+      if(await uploadRecord(record)){record.synced=true;writeScores(readScores().map(r=>r.client_id===record.client_id?record:r));await loadCloudScores()}
+    }
 
     function captureCandidateScore(message){
       const text=String(message||"");
       const patterns=[
-        {re:/\b_sumTotalScore\s*=\s*(\d+)/i,p:5},
-        {re:/\bplayerTotalScore\s*=\s*(\d+)/i,p:5},
-        {re:/\bcombinedScore\s*=\s*(\d+)/i,p:4},
-        {re:/\btotalScore\s*=\s*(\d+)/i,p:4},
-        {re:/\bcurScore\s*=\s*(\d+)/i,p:2}
+        {re:/\b_sumTotalScore\s*=\s*(\d+)/i,p:5},{re:/\bplayerTotalScore\s*=\s*(\d+)/i,p:5},{re:/\bcombinedScore\s*=\s*(\d+)/i,p:4},{re:/\btotalScore\s*=\s*(\d+)/i,p:4},{re:/\bcurScore\s*=\s*(\d+)/i,p:2}
       ];
-      for(const {re,p} of patterns){
-        const m=text.match(re);if(!m)continue;
-        const n=Number(m[1]);
-        if(Number.isInteger(n)&&n>0&&n<=999999999&&p>=detectedScorePriority){detectedFinalScore=n;detectedScorePriority=p}
-      }
+      for(const {re,p} of patterns){const m=text.match(re);if(!m)continue;const n=Number(m[1]);if(Number.isInteger(n)&&n>0&&n<=999999999&&p>=detectedScorePriority){detectedFinalScore=n;detectedScorePriority=p}}
       const strongFinal=/--SummaryScreen\.uploadScore\(\)--|ScoreUploading|STATE_POST_SCORE_COUNTING/i.test(text);
-      if(strongFinal&&detectedFinalScore) scheduleAutoPrompt(400);
-      else if(detectedScorePriority>=4&&detectedFinalScore) scheduleAutoPrompt(2600);
+      if(strongFinal&&detectedFinalScore)scheduleAutoPrompt(400);else if(detectedScorePriority>=4&&detectedFinalScore)scheduleAutoPrompt(2600)
     }
-
     function scheduleAutoPrompt(delay){
-      if(autoPromptTimer)clearTimeout(autoPromptTimer);
-      autoPromptTimer=setTimeout(()=>{
-        const score=detectedFinalScore;
-        if(!score)return;
-        const now=Date.now();
-        if(lastAutoPrompt.score===score&&now-lastAutoPrompt.time<45000)return;
-        lastAutoPrompt={score,time:now};
-        openScores(score,true);
-        detectedFinalScore=null;detectedScorePriority=0;
-      },delay);
+      if(autoPromptTimer)clearTimeout(autoPromptTimer);autoPromptTimer=setTimeout(()=>{const score=detectedFinalScore;if(!score)return;const now=Date.now();if(lastAutoPrompt.score===score&&now-lastAutoPrompt.time<45000)return;lastAutoPrompt={score,time:now};openScores(score,true);detectedFinalScore=null;detectedScorePriority=0},delay)
     }
+    function parseFSCommand(command,args){const c=String(command||"").toLowerCase();if(!/(score|result|complete|finish|gameover|final|brain)/.test(c))return;const nums=String(args??"").match(/\d+/g)?.map(Number)||[];if(nums.length){detectedFinalScore=Math.max(...nums);detectedScorePriority=6;scheduleAutoPrompt(250)}}
 
     async function startGame(){
       playBtn.disabled=true;setStatus("Loading game…");
@@ -148,42 +175,32 @@
         await registerSW();await loadScript(RUFFLE_PATH);await warmOfflineCache();
         const ruffle=window.RufflePlayer.newest();const player=ruffle.createPlayer();document.getElementById("player").replaceChildren(player);player.style.width="100%";player.style.height="100%";
         const api=player.ruffle();
-        api.traceObserver=captureCandidateScore;
-        await api.load(SWF_PATH);
-        startScreen.hidden=true;setStatus("Playing · score capture ready");setTimeout(()=>setStatus("Offline ready"),3500)
+        try{api.traceObserver=captureCandidateScore}catch(e){console.warn("Trace score hook unavailable",e)}
+        try{if(typeof api.addFSCommandHandler==="function")api.addFSCommandHandler(parseFSCommand)}catch(e){console.warn("FSCommand score hook unavailable",e)}
+        await api.load(SWF_PATH);startScreen.hidden=true;setStatus("Playing · shared scores ready");setTimeout(()=>setStatus("Offline ready"),3500);syncScores()
       }catch(e){console.error(e);setStatus("Could not start",true);playBtn.disabled=false;alert("The game could not start. Check that the preserved SWF and local Ruffle files were included in this build.")}
     }
 
-    function readScores(){try{const data=JSON.parse(localStorage.getItem(SCORE_KEY)||"[]");return Array.isArray(data)?data.filter(x=>x&&Number.isFinite(Number(x.score))):[]}catch(_){return []}}
-    function writeScores(scores){localStorage.setItem(SCORE_KEY,JSON.stringify(scores.slice(0,200)))}
-    function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
-    function renderScores(){const scores=readScores().sort((a,b)=>Number(b.score)-Number(a.score)||String(b.date).localeCompare(String(a.date)));if(!scores.length){scoreList.innerHTML='<div class="empty">No saved scores yet. Complete a full game and the final score should be detected automatically.</div>';return}scoreList.innerHTML=scores.slice(0,50).map((s,i)=>`<div class="score-row"><div class="rank">#${i+1}</div><div class="who"><strong>${esc(s.name||"Player")}</strong><small>${new Date(s.date).toLocaleString()}</small></div><div class="points">${Number(s.score).toLocaleString()}</div></div>`).join("")}
     function openScores(prefillScore=null,isAuto=false){
-      autoEntryMode=Boolean(isAuto&&Number.isInteger(Number(prefillScore)));
-      playerName.value=localStorage.getItem(NAME_KEY)||"";
-      brainScore.value=autoEntryMode?String(prefillScore):"";
-      brainScore.readOnly=autoEntryMode;
-      scoreTitle.textContent=autoEntryMode?"Save your score":"Local Challenge";
-      scoreSub.textContent=autoEntryMode?`Final score detected: ${Number(prefillScore).toLocaleString()}. Enter your name to add it to the leaderboard.`:"The original Facebook Challenge service no longer exists. Record a score here for the local family leaderboard.";
-      renderScores();modal.hidden=false;
-      setTimeout(()=>{if(!playerName.value){playerName.focus()}else if(autoEntryMode){playerName.focus();playerName.select()}else{brainScore.focus()}},50)
+      autoEntryMode=Boolean(isAuto&&Number.isInteger(Number(prefillScore)));playerName.value=localStorage.getItem(NAME_KEY)||"";brainScore.value=autoEntryMode?String(prefillScore):"";brainScore.readOnly=autoEntryMode;
+      scoreTitle.textContent=autoEntryMode?"Save your score":"Shared Leaderboard";
+      scoreSub.textContent=autoEntryMode?`Final score detected: ${Number(prefillScore).toLocaleString()}. Enter your name to save it across all your devices.`:"Scores sync across your devices. You can also enter a result manually.";
+      renderScores();modal.hidden=false;syncScores();setTimeout(()=>{if(!playerName.value)playerName.focus();else if(autoEntryMode){playerName.focus();playerName.select()}else brainScore.focus()},50)
     }
     function closeScores(){modal.hidden=true;autoEntryMode=false;brainScore.readOnly=false}
 
-    document.getElementById("scoreForm").addEventListener("submit",e=>{
-      e.preventDefault();const name=playerName.value.trim();const score=Number(brainScore.value);if(!name||!Number.isInteger(score)||score<0||score>999999999)return;
-      const scores=readScores();scores.push({name,score,date:new Date().toISOString(),source:autoEntryMode?"game":"manual"});writeScores(scores);localStorage.setItem(NAME_KEY,name);renderScores();
-      if(autoEntryMode){setStatus(`Saved ${score.toLocaleString()} for ${name}`);setTimeout(closeScores,450)}else{brainScore.value="";brainScore.focus()}
+    document.getElementById("scoreForm").addEventListener("submit",async e=>{
+      e.preventDefault();const name=playerName.value.trim();const score=validScore(brainScore.value);if(!name||score===null)return;const btn=e.submitter;btn.disabled=true;
+      try{localStorage.setItem(NAME_KEY,name);await saveScore(name,score,autoEntryMode?"automatic":"manual");setStatus(`Saved ${score.toLocaleString()} for ${name}`);if(autoEntryMode)setTimeout(closeScores,600);else{brainScore.value="";brainScore.focus()}}finally{btn.disabled=false}
     });
     document.getElementById("scores").addEventListener("click",()=>openScores());document.getElementById("closeScores").addEventListener("click",closeScores);modal.addEventListener("click",e=>{if(e.target===modal)closeScores()});
-    document.getElementById("backup").addEventListener("click",()=>{const payload={format:"whtbb-local-challenge",version:2,exportedAt:new Date().toISOString(),scores:readScores(),lastPlayer:localStorage.getItem(NAME_KEY)||""};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`whtbb-scores-${new Date().toISOString().slice(0,10)}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)});
+    document.getElementById("backup").addEventListener("click",()=>{const payload={format:"whtbb-shared-leaderboard",version:3,exportedAt:new Date().toISOString(),scores:mergedScores(),lastPlayer:localStorage.getItem(NAME_KEY)||""};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`whtbb-scores-${new Date().toISOString().slice(0,10)}.json`;document.body.appendChild(a);a.click();const href=a.href;a.remove();setTimeout(()=>URL.revokeObjectURL(href),1000)});
     document.getElementById("restore").addEventListener("click",()=>document.getElementById("restoreFile").click());
-    document.getElementById("restoreFile").addEventListener("change",async e=>{const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());if(data?.format!=="whtbb-local-challenge"||!Array.isArray(data.scores))throw new Error("Invalid backup");writeScores(data.scores);if(typeof data.lastPlayer==="string")localStorage.setItem(NAME_KEY,data.lastPlayer);renderScores();alert("Local Challenge backup restored.")}catch(_){alert("That file is not a valid WHTBB score backup.")}finally{e.target.value=""}});
-    document.getElementById("clearScores").addEventListener("click",()=>{if(confirm("Clear all locally recorded WHTBB scores on this device?")){localStorage.removeItem(SCORE_KEY);renderScores()}});
+    document.getElementById("restoreFile").addEventListener("change",async e=>{const file=e.target.files?.[0];if(!file)return;try{const data=JSON.parse(await file.text());if(!Array.isArray(data?.scores))throw new Error("Invalid backup");const local=readScores();for(const s of data.scores){const score=validScore(s.score);if(score===null)continue;local.push({name:String(s.name||"Player").slice(0,30),score,date:s.date||new Date().toISOString(),source:"imported",client_id:s.client_id||uid(),synced:false})}writeScores(local);if(typeof data.lastPlayer==="string")localStorage.setItem(NAME_KEY,data.lastPlayer);renderScores();await syncScores();alert("WHTBB score backup restored and synced.")}catch(_){alert("That file is not a valid WHTBB score backup.")}finally{e.target.value=""}});
 
     playBtn.addEventListener("click",startGame);
     document.getElementById("fullscreen").addEventListener("click",async()=>{const el=document.documentElement;try{if(!document.fullscreenElement&&el.requestFullscreen)await el.requestFullscreen();else if(document.exitFullscreen)await document.exitFullscreen()}catch(_){}});
-    registerSW();
+    registerSW();syncScores();
   </script>
 </body>
 </html>
