@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#12162a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Biggest Brain" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+  <link rel="icon" href="/icons/icon-192.png" />
+  <title>Who Has The Biggest Brain?</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0c1022;--panel:#161d39;--ink:#fff;--muted:#aeb7d5;--accent:#ffdf4d;--danger:#ff7d7d}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    html,body{margin:0;width:100%;height:100%;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink);overflow:hidden}
+    body{padding:max(env(safe-area-inset-top),8px) max(env(safe-area-inset-right),8px) max(env(safe-area-inset-bottom),8px) max(env(safe-area-inset-left),8px)}
+    .shell{width:100%;height:100%;display:grid;grid-template-rows:auto 1fr;gap:10px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;background:rgba(22,29,57,.92);border-radius:16px}
+    .brand{min-width:0}.brand h1{font-size:clamp(17px,2.3vw,24px);line-height:1.1;margin:0}.brand p{font-size:12px;color:var(--muted);margin:4px 0 0}
+    .actions{display:flex;gap:8px;align-items:center;flex-shrink:0}
+    button{appearance:none;border:0;border-radius:12px;padding:10px 14px;font-weight:800;font-size:14px;background:var(--accent);color:#171300;cursor:pointer}
+    button.secondary{background:#2a335c;color:#fff}
+    button:disabled{opacity:.55}
+    #stage{position:relative;min-height:0;border-radius:18px;overflow:hidden;background:#000;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+    #player{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+    ruffle-player{width:100%;height:100%}
+    .start{position:absolute;inset:0;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 35%,#29346a 0,#11162e 58%,#080b18 100%);z-index:5}
+    .card{text-align:center;max-width:680px}.brain{font-size:84px;filter:drop-shadow(0 8px 20px rgba(0,0,0,.35))}.card h2{font-size:clamp(28px,5vw,54px);margin:8px 0}.card p{color:var(--muted);line-height:1.45;margin:0 auto 18px;max-width:560px}.card button{font-size:18px;padding:14px 22px}
+    .status{font-size:12px;color:var(--muted);text-align:right;min-width:140px}.error{color:var(--danger)}
+    @media (max-width:700px){header{padding:7px 9px}.brand p{display:none}.status{display:none}button{padding:9px 11px}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="brand">
+        <h1>Who Has The Biggest Brain?</h1>
+        <p>Playfish (2009) · preserved offline build</p>
+      </div>
+      <div class="actions">
+        <span id="status" class="status">Ready</span>
+        <button id="fullscreen" class="secondary" type="button">Full screen</button>
+      </div>
+    </header>
+    <main id="stage">
+      <div id="player"></div>
+      <div class="start" id="startScreen">
+        <div class="card">
+          <div class="brain" aria-hidden="true">🧠</div>
+          <h2>Who Has The Biggest Brain?</h2>
+          <p>This preserved edition runs the original Flash game locally through Ruffle. Tap Play once while online so the iPad can cache the game and emulator for offline use.</p>
+          <button id="play" type="button">Play</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const SWF_PATH = "/games/whtbb/brain_game_2_6_7_translated_v1.swf";
+    const RUFFLE_PATH = "/vendor/ruffle/ruffle.js";
+    const statusEl = document.getElementById("status");
+    const playBtn = document.getElementById("play");
+    const startScreen = document.getElementById("startScreen");
+
+    window.RufflePlayer = window.RufflePlayer || {};
+    window.RufflePlayer.config = {
+      autoplay: "on",
+      unmuteOverlay: "hidden",
+      backgroundColor: "#000000",
+      letterbox: "on",
+      scale: "showAll",
+      forceScale: true,
+      quality: "high",
+      preferredRenderer: "webgpu",
+      warnOnUnsupportedContent: false,
+      contextMenu: false,
+      allowScriptAccess: true
+    };
+
+    function setStatus(text, isError=false){statusEl.textContent=text;statusEl.classList.toggle("error",isError)}
+
+    async function registerSW(){
+      if(!("serviceWorker" in navigator)) return null;
+      try { return await navigator.serviceWorker.register("/sw.js"); }
+      catch(e){ console.warn("Service worker registration failed",e); return null; }
+    }
+
+    function loadScript(src){
+      return new Promise((resolve,reject)=>{
+        if(document.querySelector(`script[src="${src}"]`)) return resolve();
+        const s=document.createElement("script"); s.src=src; s.onload=resolve; s.onerror=reject; document.head.appendChild(s);
+      });
+    }
+
+    async function warmOfflineCache(){
+      const reg = await navigator.serviceWorker.ready.catch(()=>null);
+      const target = reg?.active || navigator.serviceWorker.controller;
+      if(target) target.postMessage({type:"CACHE_GAME"});
+    }
+
+    async function startGame(){
+      playBtn.disabled=true; setStatus("Loading game…");
+      try{
+        await registerSW();
+        await loadScript(RUFFLE_PATH);
+        await warmOfflineCache();
+        const ruffle = window.RufflePlayer.newest();
+        const player = ruffle.createPlayer();
+        document.getElementById("player").replaceChildren(player);
+        player.style.width="100%"; player.style.height="100%";
+        await player.ruffle().load({url:SWF_PATH, autoplay:"on"});
+        startScreen.hidden=true; setStatus("Playing · offline cache warming");
+        setTimeout(()=>setStatus("Offline ready"),3500);
+      }catch(e){
+        console.error(e); setStatus("Could not start",true); playBtn.disabled=false;
+        alert("The game could not start. Check that the preserved SWF and local Ruffle files were included in this build.");
+      }
+    }
+
+    playBtn.addEventListener("click", startGame);
+    document.getElementById("fullscreen").addEventListener("click", async()=>{
+      const el=document.documentElement;
+      try{ if(!document.fullscreenElement && el.requestFullscreen) await el.requestFullscreen(); else if(document.exitFullscreen) await document.exitFullscreen(); }catch(_){}
+    });
+    registerSW();
+  </script>
+</body>
+</html>

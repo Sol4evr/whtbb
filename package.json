@@ -1,0 +1,9 @@
+{
+  "name": "whtbb-ipad-app",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "bash scripts/fetch-assets.sh",
+    "serve": "python3 -m http.server 8080"
+  }
+}

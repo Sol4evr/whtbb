@@ -1,0 +1,10 @@
+{
+  "buildCommand": "bash scripts/fetch-assets.sh",
+  "outputDirectory": ".",
+  "cleanUrls": true,
+  "headers": [
+    {"source":"/(.*)\\.wasm","headers":[{"key":"Content-Type","value":"application/wasm"},{"key":"Cache-Control","value":"public, max-age=31536000, immutable"}]},
+    {"source":"/games/(.*)\\.swf","headers":[{"key":"Content-Type","value":"application/x-shockwave-flash"},{"key":"Cache-Control","value":"public, max-age=31536000, immutable"}]},
+    {"source":"/sw.js","headers":[{"key":"Cache-Control","value":"no-cache"}]}
+  ]
+}
