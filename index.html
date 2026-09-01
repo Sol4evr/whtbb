@@ -27,6 +27,7 @@
     #player{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
     ruffle-player{width:100%;height:100%}
     .start{position:absolute;inset:0;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 35%,#29346a 0,#11162e 58%,#080b18 100%);z-index:5}
+    .start[hidden]{display:none!important}
     .card{text-align:center;max-width:680px}.brain{font-size:84px;filter:drop-shadow(0 8px 20px rgba(0,0,0,.35))}.card h2{font-size:clamp(28px,5vw,54px);margin:8px 0}.card p{color:var(--muted);line-height:1.45;margin:0 auto 18px;max-width:560px}.card button{font-size:18px;padding:14px 22px}
     .status{font-size:12px;color:var(--muted);text-align:right;min-width:140px}.error{color:var(--danger)}
     @media (max-width:700px){header{padding:7px 9px}.brand p{display:none}.status{display:none}button{padding:9px 11px}}
@@ -109,8 +110,9 @@
         const player = ruffle.createPlayer();
         document.getElementById("player").replaceChildren(player);
         player.style.width="100%"; player.style.height="100%";
-        await player.ruffle().load({url:SWF_PATH, autoplay:"on"});
-        startScreen.hidden=true; setStatus("Playing · offline cache warming");
+        await player.ruffle().load(SWF_PATH);
+        startScreen.hidden=true;
+        setStatus("Playing · offline cache warming");
         setTimeout(()=>setStatus("Offline ready"),3500);
       }catch(e){
         console.error(e); setStatus("Could not start",true); playBtn.disabled=false;
