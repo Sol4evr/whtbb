@@ -1,5 +1,5 @@
-const SHELL_CACHE = "whtbb-shell-v4";
-const GAME_CACHE = "whtbb-game-v4";
+const SHELL_CACHE = "whtbb-shell-v5";
+const GAME_CACHE = "whtbb-game-v5";
 const SHELL = ["/", "/index.html", "/manifest.json", "/icons/icon-180.png", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", event => {
