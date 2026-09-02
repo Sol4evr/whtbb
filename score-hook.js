@@ -1,10 +1,13 @@
 (() => {
-  // Preservation-safe bridge: use the original movie's own diagnostic traces to
-  // detect the final stable result without modifying the checksum-verified SWF.
+  // Preservation-safe bridge: reconstruct the exact final score from traces the
+  // original SWF already emits. The checksum-verified movie is not modified.
   let resultScreenSeen = false;
   let lastCurScore = null;
   let settleTimer = null;
   let lastTraceAt = 0;
+  let uploadTraceArmed = false;
+  let categoryScores = [];
+  let categoryTimer = null;
 
   if (typeof captureCandidateScore !== "function" || typeof scheduleAutoPrompt !== "function") {
     console.warn("WHTBB score bridge: host score hooks unavailable");
@@ -13,19 +16,46 @@
 
   const baseCapture = captureCandidateScore;
 
+  function publishScore(score, delay = 150) {
+    const value = Number(score);
+    if (!Number.isInteger(value) || value <= 0 || value > 999999999) return;
+    detectedFinalScore = value;
+    detectedScorePriority = Math.max(detectedScorePriority || 0, 10);
+    scheduleAutoPrompt(delay);
+  }
+
+  function resetCategoryCapture() {
+    uploadTraceArmed = false;
+    categoryScores = [];
+    if (categoryTimer) clearTimeout(categoryTimer);
+    categoryTimer = null;
+  }
+
+  function finishCategoryCapture() {
+    if (categoryScores.length !== 4) return;
+    const total = categoryScores.reduce((sum, value) => sum + value, 0);
+    resetCategoryCapture();
+    publishScore(total, 200);
+  }
+
+  function armCategoryTimeout() {
+    if (categoryTimer) clearTimeout(categoryTimer);
+    categoryTimer = setTimeout(() => {
+      // A complete normal game has four categories. Never guess from a partial set.
+      if (categoryScores.length === 4) finishCategoryCapture();
+      else resetCategoryCapture();
+    }, 2500);
+  }
+
   function armStableScore(delay = 1400) {
     if (!resultScreenSeen || !Number.isInteger(lastCurScore) || lastCurScore <= 0) return;
     if (settleTimer) clearTimeout(settleTimer);
     settleTimer = setTimeout(() => {
-      // Score counting emits repeated curScore traces. Only accept the value once
-      // traces have gone quiet long enough to represent the completed result.
       if (Date.now() - lastTraceAt < 900) {
         armStableScore(900);
         return;
       }
-      detectedFinalScore = lastCurScore;
-      detectedScorePriority = Math.max(detectedScorePriority || 0, 5);
-      scheduleAutoPrompt(150);
+      publishScore(lastCurScore, 150);
       resultScreenSeen = false;
       lastCurScore = null;
     }, delay);
@@ -35,6 +65,33 @@
     const text = String(message ?? "");
     baseCapture(message);
 
+    // SummaryScreen.uploadScore() loops over the four categories. Immediately
+    // before each MinigameScore.toString() trace it emits this marker. The
+    // MinigameScore is constructed from the protected category score, so summing
+    // the four `score=` values reproduces SummaryScreen.combinedScore exactly.
+    if (/--SummaryScreen\.uploadScore\(\)--/i.test(text)) {
+      if (!uploadTraceArmed && categoryScores.length === 0) uploadTraceArmed = true;
+      armCategoryTimeout();
+      return;
+    }
+
+    if (uploadTraceArmed) {
+      const mini = text.match(/\[MinigameScore:[^\]]*\bscore\s*=\s*(-?\d+)/i);
+      if (mini) {
+        const score = Number(mini[1]);
+        if (Number.isInteger(score) && score >= 0 && score <= 999999999) {
+          categoryScores.push(score);
+          uploadTraceArmed = false;
+          armCategoryTimeout();
+          if (categoryScores.length === 4) finishCategoryCapture();
+        } else {
+          resetCategoryCapture();
+        }
+        return;
+      }
+    }
+
+    // Retain the older fallbacks for builds that happen to trace result state.
     if (/--ResultScreen--|showResultScreen/i.test(text)) {
       resultScreenSeen = true;
       lastTraceAt = Date.now();
@@ -47,8 +104,6 @@
       if (Number.isInteger(value) && value > 0 && value <= 999999999) {
         lastCurScore = value;
         lastTraceAt = Date.now();
-        // Some builds start score counting before the ResultScreen marker reaches
-        // the observer; seeing curScore is itself a strong result-screen signal.
         resultScreenSeen = true;
         armStableScore(1500);
       }
@@ -65,12 +120,12 @@
       }
     }
 
-    if (/--SummaryScreen\.uploadScore\(\)--|ScoreUploading|STATE_POST_SCORE_COUNTING/i.test(text)) {
+    if (/ScoreUploading|STATE_POST_SCORE_COUNTING/i.test(text)) {
       resultScreenSeen = true;
       lastTraceAt = Date.now() - 1000;
       armStableScore(250);
     }
   };
 
-  console.info("WHTBB result-screen score bridge ready");
+  console.info("WHTBB category-score bridge ready");
 })();
