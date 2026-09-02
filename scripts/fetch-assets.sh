@@ -48,11 +48,30 @@ if [ "$SHA" != "$EXPECTED_SHA" ]; then
 fi
 printf '%s  %s\n' "$SHA" "games/whtbb/brain_game_2_6_7_translated_v1.swf" > "$ROOT/SHA256.txt"
 
-rm -f "$ROOT/swf-diagnostics.txt"
-
 python3 - "$ROOT" <<'PY'
-import json, pathlib, sys
+import json, pathlib, re, sys, zlib
 root=pathlib.Path(sys.argv[1])
+swf=root/"games/whtbb/brain_game_2_6_7_translated_v1.swf"
+data=swf.read_bytes()
+# CWS files are zlib-compressed after the 8-byte SWF header.
+if data[:3] == b"CWS":
+    try:
+        body=zlib.decompress(data[8:])
+        data=b"FWS"+data[3:8]+body
+    except Exception:
+        pass
+strings=[]
+for m in re.finditer(rb"[ -~]{4,}", data):
+    s=m.group().decode("latin1", "ignore")
+    if re.search(r"score|summary|result|upload|game.?over|finish|complete|brain|rank|total|post.?score", s, re.I):
+        strings.append(s[:300])
+# Preserve order while deduplicating and keep the diagnostic compact.
+seen=set(); matches=[]
+for s in strings:
+    if s not in seen:
+        seen.add(s); matches.append(s)
+(root/"swf-score-diagnostics.json").write_text(json.dumps({"matches":matches[:500]},indent=2)+"\n")
+
 paths=["/games/whtbb/brain_game_2_6_7_translated_v1.swf"]
 if (root/"games/whtbb/preview.png").exists(): paths.append("/games/whtbb/preview.png")
 for p in sorted((root/"vendor/ruffle").iterdir()):
