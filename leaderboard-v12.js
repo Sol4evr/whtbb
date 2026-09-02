@@ -1,5 +1,5 @@
 (() => {
-  const RELEASE="v12";
+  const RELEASE="v14";
   let syncLock=null;
 
   const style=document.createElement("style");
@@ -31,7 +31,7 @@
     return `#${i+1}`;
   }
 
-  renderScores=function renderV12Scores(){
+  renderScores=function renderV14Scores(){
     const scores=mergedScores();
     if(!scores.length){scoreList.innerHTML='<div class="empty">No saved scores yet. Complete a full game and the final score should be detected automatically.</div>';return;}
     scoreList.innerHTML=scores.slice(0,50).map((s,i)=>{
@@ -48,7 +48,7 @@
   }
 
   const oldUpload=uploadRecord;
-  uploadRecord=async function uploadV12Record(r){
+  uploadRecord=async function uploadV14Record(r){
     try{return await oldUpload(r)}catch(_){return false}
   };
 
@@ -75,7 +75,7 @@
   };
 
   const oldOpen=openScores;
-  openScores=function openV12Scores(prefillScore=null,isAuto=false){
+  openScores=function openV14Scores(prefillScore=null,isAuto=false){
     oldOpen(prefillScore,isAuto);
     if(!isAuto){
       scoreTitle.innerHTML=`Shared Leaderboard <span class="sync-badge">${RELEASE} · checking…</span>`;
@@ -100,5 +100,5 @@
   window.addEventListener("pageshow",()=>syncScores());
   document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")syncScores()});
   setTimeout(()=>syncScores(),300);
-  console.info("WHTBB leaderboard v12 ready");
+  console.info("WHTBB leaderboard v14 ready");
 })();
