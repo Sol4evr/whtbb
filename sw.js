@@ -1,6 +1,6 @@
-const SHELL_CACHE = "whtbb-shell-v8";
-const GAME_CACHE = "whtbb-game-v8";
-const SHELL = ["/", "/index.html", "/manifest.json", "/score-hook.js", "/icons/icon-180.png", "/icons/icon-192.png", "/icons/icon-512.png"];
+const SHELL_CACHE = "whtbb-shell-v9";
+const GAME_CACHE = "whtbb-game-v9";
+const SHELL = ["/", "/index.html", "/manifest.json", "/score-hook.js", "/category-leaderboard.js", "/icons/icon-180.png", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", event => {
   self.skipWaiting();
