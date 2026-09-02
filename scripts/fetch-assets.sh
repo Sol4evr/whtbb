@@ -4,6 +4,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWF_URL="https://archive.org/download/whtbb/brain_game_2_6_7_translated_v1.swf"
 PREVIEW_URL="https://archive.org/download/whtbb/00_coverscreenshot.png"
 RUFFLE_URL="https://github.com/ruffle-rs/ruffle/releases/download/v0.3.0/ruffle-0.3.0-web-selfhosted.zip"
+FFDEC_URL="https://github.com/jindrapetrik/jpexs-decompiler/releases/download/version26.2.1/ffdec_26.2.1.zip"
 SWF="$ROOT/games/whtbb/brain_game_2_6_7_translated_v1.swf"
 PREVIEW="$ROOT/games/whtbb/preview.png"
 RUFFLE_DIR="$ROOT/vendor/ruffle"
@@ -48,7 +49,7 @@ if [ "$SHA" != "$EXPECTED_SHA" ]; then
 fi
 printf '%s  %s\n' "$SHA" "games/whtbb/brain_game_2_6_7_translated_v1.swf" > "$ROOT/SHA256.txt"
 
-rm -f "$ROOT/swf-score-diagnostics.json" "$ROOT/summaryscreen-diagnostics.txt" "$ROOT/swf-diagnostics.txt"
+rm -f "$ROOT/swf-score-diagnostics.json" "$ROOT/summaryscreen-diagnostics.txt" "$ROOT/swf-diagnostics.txt" "$ROOT/minigamedefines-diagnostics.txt"
 
 python3 - "$ROOT" <<'PY'
 import json, pathlib, sys
@@ -59,6 +60,27 @@ for p in sorted((root/"vendor/ruffle").iterdir()):
     if p.is_file(): paths.append("/vendor/ruffle/"+p.name)
 (root/"precache-assets.json").write_text(json.dumps(paths,indent=2)+"\n")
 PY
+
+if command -v java >/dev/null 2>&1; then
+  FFDEC_ZIP="${TMPDIR:-/tmp}/ffdec.zip"
+  FFDEC_DIR="${TMPDIR:-/tmp}/ffdec-whtbb"
+  OUT_DIR="${TMPDIR:-/tmp}/whtbb-as"
+  rm -rf "$FFDEC_DIR" "$OUT_DIR"
+  if curl --fail --location --silent --show-error "$FFDEC_URL" -o "$FFDEC_ZIP"; then
+    mkdir -p "$FFDEC_DIR" "$OUT_DIR"
+    unzip -q "$FFDEC_ZIP" -d "$FFDEC_DIR"
+    FFDEC_JAR=$(find "$FFDEC_DIR" -name ffdec.jar -print -quit)
+    if [ -n "${FFDEC_JAR:-}" ]; then
+      java -Djava.awt.headless=true -jar "$FFDEC_JAR" -selectclass com.playfish.games.whohasthebiggestbrain.MinigameDefines -export script "$OUT_DIR" "$SWF" >/tmp/ffdec-minigame.log 2>&1 || true
+      DEF=$(find "$OUT_DIR" -type f -iname 'MinigameDefines.as' -print -quit)
+      if [ -n "${DEF:-}" ]; then
+        cp "$DEF" "$ROOT/minigamedefines-diagnostics.txt"
+      else
+        printf 'MinigameDefines export unavailable\n%s\n' "$(tail -80 /tmp/ffdec-minigame.log 2>/dev/null || true)" > "$ROOT/minigamedefines-diagnostics.txt"
+      fi
+    fi
+  fi
+fi
 
 echo "SWF bytes: $SWF_SIZE"
 echo "Ruffle ZIP bytes: $ZIP_SIZE"
