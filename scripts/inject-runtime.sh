@@ -5,8 +5,9 @@ INDEX="$ROOT/index.html"
 HOOK='<script src="/score-hook.js"></script>'
 CATEGORY='<script src="/category-leaderboard.js"></script>'
 V12='<script src="/leaderboard-v12.js"></script>'
+V14='<script src="/score-runtime-v14.js"></script>'
 
-python3 - "$INDEX" "$HOOK" "$CATEGORY" "$V12" <<'PY'
+python3 - "$INDEX" "$HOOK" "$CATEGORY" "$V12" "$V14" <<'PY'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 tags = sys.argv[2:]
@@ -23,4 +24,5 @@ PY
 grep -q 'src="/score-hook.js"' "$INDEX"
 grep -q 'src="/category-leaderboard.js"' "$INDEX"
 grep -q 'src="/leaderboard-v12.js"' "$INDEX"
+grep -q 'src="/score-runtime-v14.js"' "$INDEX"
 echo "Injected score and leaderboard hooks"
