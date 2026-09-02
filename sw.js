@@ -1,5 +1,5 @@
-const SHELL_CACHE = "whtbb-shell-v10";
-const GAME_CACHE = "whtbb-game-v10";
+const SHELL_CACHE = "whtbb-shell-v11";
+const GAME_CACHE = "whtbb-game-v11";
 const SHELL = ["/", "/index.html", "/manifest.json", "/score-hook.js", "/category-leaderboard.js", "/icons/icon-180.png", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", event => {
