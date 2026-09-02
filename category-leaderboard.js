@@ -2,6 +2,8 @@
   // Extends the existing leaderboard without changing the preserved SWF or the
   // stable game loader. Category order is verified from MinigameDefines:
   // Analysis, Calculation, Memory, Visual (internally IDENTIFY).
+  const RELEASE = "v10";
+  const RESYNC_KEY = "whtbb.cloudResync.v10";
   window.detectedCategoryScores = window.detectedCategoryScores || null;
 
   const style = document.createElement("style");
@@ -10,17 +12,17 @@
     .category-pill{font-size:11px;line-height:1.2;padding:3px 6px;border-radius:7px;background:#111831;color:#dbe2ff;white-space:nowrap}
     .category-missing{font-size:11px;color:var(--muted);margin-top:4px}
     .auto-breakdown{display:block;margin-top:5px;color:#dbe2ff}
+    .sync-badge{display:inline-block;margin-left:6px;padding:2px 6px;border-radius:999px;background:#183f32;color:#91e6b2;font-size:10px;font-weight:800;vertical-align:middle}
     @media (max-width:700px){.category-breakdown{gap:4px}.category-pill{font-size:10px;padding:3px 5px}}
   `;
   document.head.appendChild(style);
 
   function categoryObject(s) {
-    const a = validScore(s.analysis ?? s.analysis_score);
-    const c = validScore(s.calculation ?? s.calculation_score);
-    const m = validScore(s.memory ?? s.memory_score);
-    const v = validScore(s.visual ?? s.visual_score);
-    if ([a,c,m,v].some(x => x === null)) return null;
-    return {analysis:a, calculation:c, memory:m, visual:v};
+    const raw = [s?.analysis ?? s?.analysis_score, s?.calculation ?? s?.calculation_score, s?.memory ?? s?.memory_score, s?.visual ?? s?.visual_score];
+    if (raw.some(x => x === null || x === undefined || x === "")) return null;
+    const values = raw.map(validScore);
+    if (values.some(x => x === null)) return null;
+    return {analysis:values[0], calculation:values[1], memory:values[2], visual:values[3]};
   }
 
   function categoryText(cat) {
@@ -137,16 +139,17 @@
   const baseOpenScores = openScores;
   openScores = function openCategoryScores(prefillScore=null,isAuto=false) {
     baseOpenScores(prefillScore,isAuto);
+    scoreTitle.innerHTML = isAuto ? "Save your score" : `Shared Leaderboard <span class="sync-badge">${RELEASE} · cloud</span>`;
     if (isAuto) {
       const cat=categoryObject(window.detectedCategoryScores||{});
       if (cat) {
         scoreSub.innerHTML=`Final score detected: <strong>${Number(prefillScore).toLocaleString()}</strong>. Enter your name to save it across all your devices.<span class="auto-breakdown">${esc(categoryText(cat))}</span>`;
       }
+    } else {
+      scoreSub.textContent="Cloud-synced totals and category scores across iPad, iPhone and browser.";
     }
   };
 
-  // Preserve category values when restoring v4+ backups. This capture-phase
-  // handler supersedes the older total-only restore listener in index.html.
   const restoreFile=document.getElementById("restoreFile");
   restoreFile.addEventListener("change",async e=>{
     const file=e.target.files?.[0];
@@ -173,7 +176,30 @@
     }
   },true);
 
-  // Refresh once with the expanded cloud projection.
+  let resyncing=false;
+  async function retryCloudSync(){
+    if(resyncing || !navigator.onLine)return;
+    resyncing=true;
+    try{await syncScores();}finally{resyncing=false;}
+  }
+
+  // The earlier database schema rejected on_conflict uploads because client_id
+  // was not unique. Force every locally retained row through the corrected cloud
+  // upsert once on this release. The new UNIQUE constraint makes this idempotent.
+  try{
+    if(!localStorage.getItem(RESYNC_KEY)){
+      const local=readScores().map(r=>({...r,synced:false}));
+      writeScores(local);
+      localStorage.setItem(RESYNC_KEY,new Date().toISOString());
+    }
+  }catch(_){ }
+
+  window.addEventListener("online",retryCloudSync);
+  window.addEventListener("pageshow",retryCloudSync);
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")retryCloudSync()});
+  setTimeout(retryCloudSync,250);
+  setTimeout(retryCloudSync,2500);
+
   loadCloudScores();
-  console.info("WHTBB category leaderboard ready");
+  console.info(`WHTBB category leaderboard ${RELEASE} ready`);
 })();
