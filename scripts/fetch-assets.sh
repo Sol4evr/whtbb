@@ -53,24 +53,21 @@ import json, pathlib, re, sys, zlib
 root=pathlib.Path(sys.argv[1])
 swf=root/"games/whtbb/brain_game_2_6_7_translated_v1.swf"
 data=swf.read_bytes()
-# CWS files are zlib-compressed after the 8-byte SWF header.
 if data[:3] == b"CWS":
     try:
-        body=zlib.decompress(data[8:])
-        data=b"FWS"+data[3:8]+body
+        data=b"FWS"+data[3:8]+zlib.decompress(data[8:])
     except Exception:
         pass
+keywords=r"score|summary|result|upload|game.?over|finish|complete|brain|rank|total|post.?score|externalinterface|addcallback|javascript|fscommand|callback"
 strings=[]
 for m in re.finditer(rb"[ -~]{4,}", data):
     s=m.group().decode("latin1", "ignore")
-    if re.search(r"score|summary|result|upload|game.?over|finish|complete|brain|rank|total|post.?score", s, re.I):
-        strings.append(s[:300])
-# Preserve order while deduplicating and keep the diagnostic compact.
+    if re.search(keywords, s, re.I): strings.append(s[:400])
 seen=set(); matches=[]
 for s in strings:
     if s not in seen:
         seen.add(s); matches.append(s)
-(root/"swf-score-diagnostics.json").write_text(json.dumps({"matches":matches[:500]},indent=2)+"\n")
+(root/"swf-score-diagnostics.json").write_text(json.dumps({"matches":matches[:700]},indent=2)+"\n")
 
 paths=["/games/whtbb/brain_game_2_6_7_translated_v1.swf"]
 if (root/"games/whtbb/preview.png").exists(): paths.append("/games/whtbb/preview.png")
