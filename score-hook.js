@@ -1,6 +1,6 @@
 (() => {
-  // Preservation-safe bridge: reconstruct the exact final score from traces the
-  // original SWF already emits. The checksum-verified movie is not modified.
+  // Preservation-safe bridge: reconstruct the exact final score and four category
+  // scores from traces the original SWF already emits. The SWF is not modified.
   let resultScreenSeen = false;
   let lastCurScore = null;
   let settleTimer = null;
@@ -16,11 +16,19 @@
 
   const baseCapture = captureCandidateScore;
 
-  function publishScore(score, delay = 150) {
+  function publishScore(score, delay = 150, categories = null) {
     const value = Number(score);
     if (!Number.isInteger(value) || value <= 0 || value > 999999999) return;
     detectedFinalScore = value;
     detectedScorePriority = Math.max(detectedScorePriority || 0, 10);
+    if (Array.isArray(categories) && categories.length === 4) {
+      detectedCategoryScores = {
+        analysis: categories[0],
+        calculation: categories[1],
+        memory: categories[2],
+        visual: categories[3]
+      };
+    }
     scheduleAutoPrompt(delay);
   }
 
@@ -33,15 +41,15 @@
 
   function finishCategoryCapture() {
     if (categoryScores.length !== 4) return;
-    const total = categoryScores.reduce((sum, value) => sum + value, 0);
+    const categories = categoryScores.slice();
+    const total = categories.reduce((sum, value) => sum + value, 0);
     resetCategoryCapture();
-    publishScore(total, 200);
+    publishScore(total, 200, categories);
   }
 
   function armCategoryTimeout() {
     if (categoryTimer) clearTimeout(categoryTimer);
     categoryTimer = setTimeout(() => {
-      // A complete normal game has four categories. Never guess from a partial set.
       if (categoryScores.length === 4) finishCategoryCapture();
       else resetCategoryCapture();
     }, 2500);
@@ -65,12 +73,10 @@
     const text = String(message ?? "");
     baseCapture(message);
 
-    // SummaryScreen.uploadScore() loops over the four categories. Immediately
-    // before each MinigameScore.toString() trace it emits this marker. The
-    // MinigameScore is constructed from the protected category score, so summing
-    // the four `score=` values reproduces SummaryScreen.combinedScore exactly.
+    // SummaryScreen.uploadScore() iterates category indexes 0..3 in the SWF's
+    // authoritative order: Analysis, Calculation, Memory, Visual (Identify).
     if (/--SummaryScreen\.uploadScore\(\)--/i.test(text)) {
-      if (!uploadTraceArmed && categoryScores.length === 0) uploadTraceArmed = true;
+      if (!uploadTraceArmed) uploadTraceArmed = true;
       armCategoryTimeout();
       return;
     }
@@ -91,7 +97,8 @@
       }
     }
 
-    // Retain the older fallbacks for builds that happen to trace result state.
+    // Fallbacks retain total-only detection if a different compatible build emits
+    // result-state traces but not the four MinigameScore lines.
     if (/--ResultScreen--|showResultScreen/i.test(text)) {
       resultScreenSeen = true;
       lastTraceAt = Date.now();
