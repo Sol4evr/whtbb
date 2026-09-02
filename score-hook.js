@@ -5,7 +5,7 @@
   let lastCurScore = null;
   let settleTimer = null;
   let lastTraceAt = 0;
-  let uploadTraceArmed = false;
+  let categoryCaptureActive = false;
   let categoryScores = [];
   let categoryTimer = null;
 
@@ -22,7 +22,7 @@
     detectedFinalScore = value;
     detectedScorePriority = Math.max(detectedScorePriority || 0, 10);
     if (Array.isArray(categories) && categories.length === 4) {
-      detectedCategoryScores = {
+      window.detectedCategoryScores = {
         analysis: categories[0],
         calculation: categories[1],
         memory: categories[2],
@@ -33,26 +33,28 @@
   }
 
   function resetCategoryCapture() {
-    uploadTraceArmed = false;
+    categoryCaptureActive = false;
     categoryScores = [];
     if (categoryTimer) clearTimeout(categoryTimer);
     categoryTimer = null;
   }
 
   function finishCategoryCapture() {
-    if (categoryScores.length !== 4) return;
-    const categories = categoryScores.slice();
+    if (categoryScores.length !== 4) return false;
+    const categories = categoryScores.slice(0, 4);
     const total = categories.reduce((sum, value) => sum + value, 0);
     resetCategoryCapture();
-    publishScore(total, 200, categories);
+    publishScore(total, 180, categories);
+    return true;
   }
 
   function armCategoryTimeout() {
     if (categoryTimer) clearTimeout(categoryTimer);
     categoryTimer = setTimeout(() => {
-      if (categoryScores.length === 4) finishCategoryCapture();
-      else resetCategoryCapture();
-    }, 2500);
+      // Do not silently discard a valid total fallback if only part of the
+      // category trace sequence was observed.
+      if (!finishCategoryCapture()) resetCategoryCapture();
+    }, 5000);
   }
 
   function armStableScore(delay = 1400) {
@@ -73,23 +75,25 @@
     const text = String(message ?? "");
     baseCapture(message);
 
-    // SummaryScreen.uploadScore() iterates category indexes 0..3 in the SWF's
-    // authoritative order: Analysis, Calculation, Memory, Visual (Identify).
+    // SummaryScreen.uploadScore() starts the final-score upload sequence. Once
+    // seen, keep the capture window active until all four MinigameScore traces
+    // arrive; do not disarm after the first category.
     if (/--SummaryScreen\.uploadScore\(\)--/i.test(text)) {
-      if (!uploadTraceArmed) uploadTraceArmed = true;
+      if (!categoryCaptureActive) {
+        categoryCaptureActive = true;
+        categoryScores = [];
+      }
       armCategoryTimeout();
-      return;
     }
 
-    if (uploadTraceArmed) {
+    if (categoryCaptureActive) {
       const mini = text.match(/\[MinigameScore:[^\]]*\bscore\s*=\s*(-?\d+)/i);
       if (mini) {
         const score = Number(mini[1]);
         if (Number.isInteger(score) && score >= 0 && score <= 999999999) {
           categoryScores.push(score);
-          uploadTraceArmed = false;
           armCategoryTimeout();
-          if (categoryScores.length === 4) finishCategoryCapture();
+          if (categoryScores.length >= 4) finishCategoryCapture();
         } else {
           resetCategoryCapture();
         }
@@ -97,8 +101,8 @@
       }
     }
 
-    // Fallbacks retain total-only detection if a different compatible build emits
-    // result-state traces but not the four MinigameScore lines.
+    // Fallbacks retain total-only detection if a compatible build emits result
+    // state traces but not the four category lines.
     if (/--ResultScreen--|showResultScreen/i.test(text)) {
       resultScreenSeen = true;
       lastTraceAt = Date.now();
@@ -134,5 +138,5 @@
     }
   };
 
-  console.info("WHTBB category-score bridge ready");
+  console.info("WHTBB category-score bridge v13 ready");
 })();
