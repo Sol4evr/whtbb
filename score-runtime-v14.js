@@ -2,16 +2,37 @@
   const RELEASE = "v14";
   const TRACE_KEY = "whtbb.trace.tail.v14";
   let traceTail = [];
+  let activeApi = null;
+
+  function persistTrace() {
+    try { localStorage.setItem(TRACE_KEY, JSON.stringify(traceTail)); } catch (_) {}
+  }
 
   function rememberTrace(message) {
     const text = String(message ?? "");
     window.__whtbbTraceCount = (window.__whtbbTraceCount || 0) + 1;
-    if (/SummaryScreen|MinigameScore|ResultScreen|ScoreUploading|STATE_POST_SCORE_COUNTING|curScore|combinedScore|totalScore/i.test(text)) {
-      traceTail.push({ at: new Date().toISOString(), text: text.slice(0, 500) });
-      traceTail = traceTail.slice(-80);
-      try { localStorage.setItem(TRACE_KEY, JSON.stringify(traceTail)); } catch (_) {}
-    }
+    traceTail.push({ at: new Date().toISOString(), text: text.slice(0, 800) });
+    traceTail = traceTail.slice(-200);
+    persistTrace();
     captureCandidateScore(text);
+  }
+
+  function attachObserver(api) {
+    if (!api) return false;
+    try {
+      api.traceObserver = rememberTrace;
+      window.__whtbbTraceObserverAttached = true;
+      activeApi = api;
+      return true;
+    } catch (e) {
+      window.__whtbbTraceObserverAttached = false;
+      console.warn("Trace score hook unavailable", e);
+      return false;
+    }
+  }
+
+  function reattachObserver() {
+    if (activeApi) attachObserver(activeApi);
   }
 
   const originalStartGame = startGame;
@@ -20,6 +41,9 @@
   startGame = async function startGameV14() {
     playBtn.disabled = true;
     setStatus("Loading game…");
+    window.__whtbbTraceCount = 0;
+    traceTail = [];
+    persistTrace();
     try {
       await registerSW();
       await loadScript(RUFFLE_PATH);
@@ -33,17 +57,14 @@
 
       const api = player.ruffle();
 
-      // Ruffle 0.3.0 forwards traceObserver only to an existing Flash instance.
-      // Therefore the observer MUST be attached after load() has created it.
+      // Ruffle 0.3.0 forwards traceObserver to the live Flash instance.
+      // Attach after load, then defensively reattach shortly afterwards and
+      // whenever the page becomes visible again during QA.
       await api.load(SWF_PATH);
-
-      try {
-        api.traceObserver = rememberTrace;
-        window.__whtbbTraceObserverAttached = true;
-      } catch (e) {
-        window.__whtbbTraceObserverAttached = false;
-        console.warn("Trace score hook unavailable after SWF load", e);
-      }
+      attachObserver(api);
+      setTimeout(reattachObserver, 250);
+      setTimeout(reattachObserver, 1500);
+      setTimeout(reattachObserver, 5000);
 
       try {
         if (typeof api.addFSCommandHandler === "function") {
@@ -65,9 +86,10 @@
   };
 
   playBtn.addEventListener("click", startGame);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") reattachObserver();
+  });
 
-  // Non-destructive parser self-test. It validates the real production bridge
-  // logic without opening the modal or writing a leaderboard row.
   window.__whtbbPipelineSelfTest = function () {
     const sample = [
       "--SummaryScreen.uploadScore()--",
@@ -82,12 +104,68 @@
     const mini = sample.filter(x => /MinigameScore/i.test(x)).map(x => Number(x.match(/\bscore\s*=\s*(-?\d+)/i)?.[1]));
     return {
       release: RELEASE,
-      observerLifecycle: "post-load",
+      observerLifecycle: "post-load-plus-reattach",
       parserPass: mini.length === 4 && mini.every(Number.isInteger) && mini.reduce((a,b) => a+b, 0) === 2218,
       sampleTotal: mini.reduce((a,b) => a+b, 0),
       expectedTotal: 2218
     };
   };
+
+  // Temporary local-QA diagnostics. This is intentionally wrapper-only and
+  // does not touch the preserved SWF. It will be removed after capture is proven.
+  const diagButton = document.createElement("button");
+  diagButton.type = "button";
+  diagButton.className = "secondary";
+  diagButton.textContent = "Diagnostics";
+  document.querySelector(".actions")?.insertBefore(diagButton, document.getElementById("fullscreen"));
+
+  const diagModal = document.createElement("section");
+  diagModal.className = "modal";
+  diagModal.hidden = true;
+  diagModal.innerHTML = `<div class="panel"><div class="panel-head"><div><h2>Score Capture Diagnostics</h2><p class="sub">Temporary v14 QA instrumentation. No game data is modified.</p></div><button class="secondary" id="closeWhtbbDiag" type="button">Done</button></div><pre id="whtbbDiagText" style="white-space:pre-wrap;word-break:break-word;background:#0f1530;padding:12px;border-radius:12px;max-height:52vh;overflow:auto;font-size:12px"></pre><div class="tools"><button id="copyWhtbbDiag" type="button">Copy diagnostics</button><button id="testWhtbbDiag" class="secondary" type="button">Run parser self-test</button></div></div>`;
+  document.body.appendChild(diagModal);
+
+  function diagnosticText() {
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem(TRACE_KEY) || "[]"); } catch (_) {}
+    const relevant = stored.filter(x => /SummaryScreen|MinigameScore|ResultScreen|ScoreUploading|STATE_POST_SCORE_COUNTING|curScore|combinedScore|totalScore/i.test(String(x?.text || "")));
+    return [
+      `release: ${RELEASE}`,
+      `observerAttached: ${Boolean(window.__whtbbTraceObserverAttached)}`,
+      `traceCount: ${Number(window.__whtbbTraceCount || 0)}`,
+      `storedTraceCount: ${stored.length}`,
+      `relevantTraceCount: ${relevant.length}`,
+      `detectedFinalScore: ${detectedFinalScore ?? "null"}`,
+      `detectedCategoryScores: ${JSON.stringify(window.detectedCategoryScores || null)}`,
+      `selfTest: ${JSON.stringify(window.__whtbbPipelineSelfTest())}`,
+      "",
+      "Relevant trace tail:",
+      ...(relevant.length ? relevant.slice(-40).map(x => `${x.at}  ${x.text}`) : ["(none)"]),
+      "",
+      "Last 40 raw traces:",
+      ...(stored.length ? stored.slice(-40).map(x => `${x.at}  ${x.text}`) : ["(none)"])
+    ].join("\n");
+  }
+
+  function openDiagnostics() {
+    document.getElementById("whtbbDiagText").textContent = diagnosticText();
+    diagModal.hidden = false;
+  }
+  diagButton.addEventListener("click", openDiagnostics);
+  diagModal.querySelector("#closeWhtbbDiag").addEventListener("click", () => { diagModal.hidden = true; });
+  diagModal.querySelector("#copyWhtbbDiag").addEventListener("click", async () => {
+    const text = diagnosticText();
+    document.getElementById("whtbbDiagText").textContent = text;
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("Diagnostics copied");
+    } catch (_) {
+      alert("Select and copy the diagnostics text manually.");
+    }
+  });
+  diagModal.querySelector("#testWhtbbDiag").addEventListener("click", () => {
+    document.getElementById("whtbbDiagText").textContent = diagnosticText();
+  });
 
   const selfTest = window.__whtbbPipelineSelfTest();
   if (!selfTest.parserPass) console.error("WHTBB score pipeline self-test failed", selfTest);
