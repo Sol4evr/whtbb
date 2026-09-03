@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ORIG="$ROOT/games/whtbb/brain_game_2_6_7_translated_v1.swf"
-OUT="$ROOT/games/whtbb/brain_game_2_6_7_translated_v1_stable.swf"
+ORIG="${1:-$ROOT/games/whtbb/brain_game_2_6_7_translated_v1_original.swf}"
+OUT="${2:-$ROOT/games/whtbb/brain_game_2_6_7_translated_v1.swf}"
 TOOLS="${TMPDIR:-/tmp}/whtbb-stable-tools"
 FFDEC="$TOOLS/ffdec"
 AS3="$TOOLS/as3"
@@ -11,7 +11,7 @@ PATCHED_AS="$TOOLS/SummaryScreen-stable.as"
 FFDEC_URL="https://github.com/jindrapetrik/jpexs-decompiler/releases/download/version26.2.1/ffdec_26.2.1.zip"
 
 [ -s "$ORIG" ] || { echo "Original SWF missing: $ORIG" >&2; exit 31; }
-mkdir -p "$TOOLS"
+mkdir -p "$TOOLS" "$(dirname "$OUT")"
 
 JAVA_BIN="$(command -v java || true)"
 if [ -z "$JAVA_BIN" ]; then
@@ -68,10 +68,6 @@ rm -rf "$VERIFY"; mkdir -p "$VERIFY"
 "$JAVA_BIN" -jar "$FFDEC_JAR" -export script "$VERIFY" "$OUT" >/dev/null
 grep -Rqs 'WHTBB_SCORES=' "$VERIFY" || { echo "Stable SWF verification failed: atomic trace missing" >&2; exit 36; }
 
-if command -v sha256sum >/dev/null 2>&1; then
-  STABLE_SHA=$(sha256sum "$OUT" | awk '{print $1}')
-else
-  STABLE_SHA=$(shasum -a 256 "$OUT" | awk '{print $1}')
-fi
-printf '%s  %s\n' "$STABLE_SHA" "games/whtbb/brain_game_2_6_7_translated_v1_stable.swf" > "$ROOT/STABLE_SHA256.txt"
+if command -v sha256sum >/dev/null 2>&1; then STABLE_SHA=$(sha256sum "$OUT" | awk '{print $1}'); else STABLE_SHA=$(shasum -a 256 "$OUT" | awk '{print $1}'); fi
+printf '%s  %s\n' "$STABLE_SHA" "games/whtbb/brain_game_2_6_7_translated_v1.swf" > "$ROOT/STABLE_SHA256.txt"
 echo "Stable SWF ready: $STABLE_SHA"
