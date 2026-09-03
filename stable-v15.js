@@ -1,5 +1,5 @@
 (() => {
-  const RELEASE = "v15.0.0";
+  const RELEASE = "v15.1.0";
   const LOCAL_KEY = "whtbb.localLeaderboard.v15";
   const DELETE_QUEUE_KEY = "whtbb.deleteQueue.v15";
   const RESET_KEY = "whtbb.storageReset.v15";
