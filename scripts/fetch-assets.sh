@@ -42,7 +42,7 @@ find "$RUFFLE_DIR" -maxdepth 1 -name '*.wasm' -print -quit | grep -q . || { echo
 python3 - "$ROOT" <<'PY'
 import json,pathlib,sys
 root=pathlib.Path(sys.argv[1])
-paths=["/games/whtbb/brain_game_2_6_7_translated_v1.swf"]
+paths=["/games/whtbb/brain_game_2_6_7_translated_v1.swf?v=15.1.0"]
 if (root/"games/whtbb/preview.png").exists(): paths.append("/games/whtbb/preview.png")
 for p in sorted((root/"vendor/ruffle").iterdir()):
     if p.is_file(): paths.append("/vendor/ruffle/"+p.name)
