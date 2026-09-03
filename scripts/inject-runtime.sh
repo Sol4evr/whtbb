@@ -3,15 +3,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INDEX="$ROOT/index.html"
 STABLE='<script src="/stable-v15.js?v=15.1.0"></script>'
+POST_SAVE='<script src="/post-save-ux-v15.1.js?v=15.1.0"></script>'
 
-python3 - "$INDEX" "$STABLE" <<'PY'
+python3 - "$INDEX" "$STABLE" "$POST_SAVE" <<'PY'
 import pathlib,re,sys
 path=pathlib.Path(sys.argv[1])
-tag=sys.argv[2]
+stable=sys.argv[2]
+post=sys.argv[3]
 text=path.read_text(encoding="utf-8")
 legacy=[
   "score-hook.js","category-leaderboard.js","leaderboard-v12.js",
-  "score-runtime-v14.js","score-runtime-v15.js","stable-v15.js"
+  "score-runtime-v14.js","score-runtime-v15.js","stable-v15.js","post-save-ux-v15.1.js"
 ]
 for src in legacy:
     text=re.sub(r'\s*<script\s+src=["\']/'+re.escape(src)+r'(?:\?[^"\']*)?["\']></script>\s*','\n',text)
@@ -20,11 +22,12 @@ text=re.sub(r'const SWF_PATH="/games/whtbb/brain_game_2_6_7_translated_v1\.swf(?
 needle="</body>"
 if needle not in text:
     raise SystemExit("index.html missing </body>")
-text=text.replace(needle,f"  {tag}\n{needle}",1)
+text=text.replace(needle,f"  {stable}\n  {post}\n{needle}",1)
 path.write_text(text,encoding="utf-8")
 PY
 
 grep -q 'stable-v15.js?v=15.1.0' "$INDEX"
+grep -q 'post-save-ux-v15.1.js?v=15.1.0' "$INDEX"
 grep -q 'brain_game_2_6_7_translated_v1.swf?v=15.1.0' "$INDEX"
 ! grep -q 'src="/score-runtime-v14.js"' "$INDEX"
-echo "Injected stable v15.1 runtime with cache-busted SWF"
+echo "Injected stable v15.1 runtime with post-save leaderboard UX"
