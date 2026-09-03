@@ -41,7 +41,13 @@ if ! find "$RUFFLE_DIR" -maxdepth 1 -name '*.wasm' -print -quit | grep -q .; the
   echo "Ruffle archive did not contain a .wasm file" >&2; exit 24
 fi
 
-SHA=$(sha256sum "$SWF" | awk '{print $1}')
+if command -v sha256sum >/dev/null 2>&1; then
+  SHA=$(sha256sum "$SWF" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+  SHA=$(shasum -a 256 "$SWF" | awk '{print $1}')
+else
+  echo "No SHA-256 utility available (expected sha256sum or shasum)" >&2; exit 26
+fi
 EXPECTED_SHA="a2bc047379274cc0f1556749c326b47d971849aa4a87c70a88da80aca448af96"
 if [ "$SHA" != "$EXPECTED_SHA" ]; then
   echo "SWF SHA-256 mismatch: $SHA (expected $EXPECTED_SHA)" >&2; exit 25
