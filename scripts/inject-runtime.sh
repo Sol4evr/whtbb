@@ -2,27 +2,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INDEX="$ROOT/index.html"
-HOOK='<script src="/score-hook.js"></script>'
-CATEGORY='<script src="/category-leaderboard.js"></script>'
-V12='<script src="/leaderboard-v12.js"></script>'
-V14='<script src="/score-runtime-v14.js"></script>'
+STABLE='<script src="/stable-v15.js"></script>'
 
-python3 - "$INDEX" "$HOOK" "$CATEGORY" "$V12" "$V14" <<'PY'
-import pathlib, sys
-path = pathlib.Path(sys.argv[1])
-tags = sys.argv[2:]
-text = path.read_text(encoding="utf-8")
-needle = "</body>"
-if needle not in text:
-    raise SystemExit("index.html missing </body>")
-for tag in tags:
-    if tag not in text:
-        text = text.replace(needle, f"  {tag}\n{needle}", 1)
-path.write_text(text, encoding="utf-8")
+python3 - "$INDEX" "$STABLE" <<'PY'
+import pathlib,sys,re
+path=pathlib.Path(sys.argv[1])
+tag=sys.argv[2]
+text=path.read_text(encoding="utf-8")n
 PY
-
-grep -q 'src="/score-hook.js"' "$INDEX"
-grep -q 'src="/category-leaderboard.js"' "$INDEX"
-grep -q 'src="/leaderboard-v12.js"' "$INDEX"
-grep -q 'src="/score-runtime-v14.js"' "$INDEX"
-echo "Injected score and leaderboard hooks"
