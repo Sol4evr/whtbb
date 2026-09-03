@@ -4,29 +4,29 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SWF_URL="https://archive.org/download/whtbb/brain_game_2_6_7_translated_v1.swf"
 PREVIEW_URL="https://archive.org/download/whtbb/00_coverscreenshot.png"
 RUFFLE_URL="https://github.com/ruffle-rs/ruffle/releases/download/v0.3.0/ruffle-0.3.0-web-selfhosted.zip"
+ORIG="$ROOT/games/whtbb/brain_game_2_6_7_translated_v1_original.swf"
 SWF="$ROOT/games/whtbb/brain_game_2_6_7_translated_v1.swf"
-STABLE="$ROOT/games/whtbb/brain_game_2_6_7_translated_v1_stable.swf"
 PREVIEW="$ROOT/games/whtbb/preview.png"
 RUFFLE_DIR="$ROOT/vendor/ruffle"
 TMP="${TMPDIR:-/tmp}/whtbb-ruffle.zip"
 
-mkdir -p "$(dirname "$SWF")" "$RUFFLE_DIR"
+mkdir -p "$(dirname "$ORIG")" "$RUFFLE_DIR"
 
-echo "Fetching preserved SWF from $SWF_URL"
-curl --fail --location --silent --show-error "$SWF_URL" -o "$SWF"
-SWF_SIZE=$(wc -c < "$SWF" | tr -d ' ')
-[ "$SWF_SIZE" -eq 1771296 ] || { echo "Unexpected SWF size: $SWF_SIZE" >&2; exit 21; }
+echo "Fetching preserved original SWF from $SWF_URL"
+curl --fail --location --silent --show-error "$SWF_URL" -o "$ORIG"
+SWF_SIZE=$(wc -c < "$ORIG" | tr -d ' ')
+[ "$SWF_SIZE" -eq 1771296 ] || { echo "Unexpected original SWF size: $SWF_SIZE" >&2; exit 21; }
 
-if command -v sha256sum >/dev/null 2>&1; then SHA=$(sha256sum "$SWF" | awk '{print $1}'); else SHA=$(shasum -a 256 "$SWF" | awk '{print $1}'); fi
+if command -v sha256sum >/dev/null 2>&1; then SHA=$(sha256sum "$ORIG" | awk '{print $1}'); else SHA=$(shasum -a 256 "$ORIG" | awk '{print $1}'); fi
 EXPECTED_SHA="a2bc047379274cc0f1556749c326b47d971849aa4a87c70a88da80aca448af96"
-[ "$SHA" = "$EXPECTED_SHA" ] || { echo "SWF SHA-256 mismatch: $SHA" >&2; exit 25; }
-printf '%s  %s\n' "$SHA" "games/whtbb/brain_game_2_6_7_translated_v1.swf" > "$ROOT/SHA256.txt"
+[ "$SHA" = "$EXPECTED_SHA" ] || { echo "Original SWF SHA-256 mismatch: $SHA" >&2; exit 25; }
+printf '%s  %s\n' "$SHA" "games/whtbb/brain_game_2_6_7_translated_v1_original.swf" > "$ROOT/SHA256.txt"
 
-echo "Building preservation-safe atomic score bridge"
-bash "$ROOT/scripts/build-stable-swf.sh"
-[ -s "$STABLE" ] || { echo "Stable SWF missing after build" >&2; exit 27; }
+echo "Building verified preservation bridge"
+bash "$ROOT/scripts/build-stable-swf.sh" "$ORIG" "$SWF"
+[ -s "$SWF" ] || { echo "Bridged SWF missing after build" >&2; exit 27; }
 
-echo "Fetching optional preview from $PREVIEW_URL"
+echo "Fetching optional preview"
 if ! curl --fail --location --silent --show-error "$PREVIEW_URL" -o "$PREVIEW"; then rm -f "$PREVIEW"; fi
 
 echo "Fetching pinned Ruffle v0.3.0"
@@ -42,7 +42,7 @@ find "$RUFFLE_DIR" -maxdepth 1 -name '*.wasm' -print -quit | grep -q . || { echo
 python3 - "$ROOT" <<'PY'
 import json,pathlib,sys
 root=pathlib.Path(sys.argv[1])
-paths=["/games/whtbb/brain_game_2_6_7_translated_v1_stable.swf"]
+paths=["/games/whtbb/brain_game_2_6_7_translated_v1.swf"]
 if (root/"games/whtbb/preview.png").exists(): paths.append("/games/whtbb/preview.png")
 for p in sorted((root/"vendor/ruffle").iterdir()):
     if p.is_file(): paths.append("/vendor/ruffle/"+p.name)
@@ -51,5 +51,5 @@ PY
 
 echo "Original SWF bytes: $SWF_SIZE"
 echo "Original SWF SHA-256: $SHA"
-echo "Stable bridged SWF verified"
+echo "Bridged SWF verified and served at canonical game path"
 echo "Assets ready."
